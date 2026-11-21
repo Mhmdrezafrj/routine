@@ -1,0 +1,51 @@
+name: Build APK from zip
+on:
+  workflow_dispatch:
+  push:
+    paths: ['*.zip']
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project
+        run: |
+          mkdir -p /tmp/src
+          unzip -q ./*.zip -d /tmp/src
+          SETTINGS=$(find /tmp/src -path '*/android/settings.gradle' | head -1)
+          [ -n "$SETTINGS" ] || { echo "android/settings.gradle not found in zip"; exit 1; }
+          echo "PROJECT=$(dirname "$(dirname "$SETTINGS")")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        run: gradle assembleDebug -p "$PROJECT/android"
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp "$PROJECT"/android/app/build/outputs/apk/debug/app-debug.apk out/routine.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: routine-apk
+          path: out/routine.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "build-${{ github.run_number }}" out/routine.apk --title "APK build ${{ github.run_number }}" --notes "Debug APK"
